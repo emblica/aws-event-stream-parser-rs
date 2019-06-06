@@ -13,7 +13,7 @@ Add this to your **Cargo.toml**:
 
 ```toml
 [dependencies]
-aws_event_stream_parser = "0.0.1"
+aws_event_stream_parser = "0.0.2"
 ```
 
 ## Usage
