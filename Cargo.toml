@@ -2,6 +2,7 @@
 name = "aws_event_stream_parser"
 version = "0.0.1"
 license = "MIT"
+readme = "readme.md"
 description = "Rust implementation of the vnd.amazon.event-stream binary format"
 repository = "https://github.com/emblica/aws-event-stream-parser-rs"
 authors = ["Teemu Heikkilä <teemu@emblica.fi>"]
