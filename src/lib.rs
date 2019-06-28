@@ -2,42 +2,36 @@
 //! It's used in some AWS APIs, this library has been created to be used with AWS Kinesis **SubscribeToShard**-endpoint
 //!
 
-
 #[cfg(test)]
 #[macro_use]
 extern crate hex_literal;
 #[macro_use]
 extern crate nom;
-extern crate crc;
-extern crate chrono;
 extern crate byteorder;
-extern crate uuid;
 extern crate bytes;
+extern crate chrono;
+extern crate crc;
 extern crate tokio_codec;
-use std::convert::From;
-use bytes::BufMut;
-use nom::Err::Incomplete;
-use nom::Err::Error;
-use nom::Err::Failure;
-use uuid::Uuid;
+extern crate uuid;
 use byteorder::BigEndian;
 use byteorder::ByteOrder;
-use crc::{crc32};
-use crc::Hasher32;
+use bytes::BufMut;
 use chrono::prelude::*;
-use nom::number::streaming::{be_u64, be_u32, be_u16, be_u8};
-use nom::{
-  IResult
-  //bytes::complete::{take},
-  //combinator::many0
-};
+use crc::crc32;
+use crc::Hasher32;
+use nom::number::streaming::{be_u16, be_u32, be_u64, be_u8};
+use nom::Err::Error;
+use nom::Err::Failure;
+use nom::Err::Incomplete;
+use nom::IResult;
+use std::convert::From;
+use uuid::Uuid;
 const PRELUDE_SIZE: u32 = 12;
 const CHECKSUM_SIZE: u32 = 4;
 
 use nom::bytes::streaming::take;
 
-
-fn u32_to_u8(x:u32) -> Vec<u8> {
+fn u32_to_u8(x: u32) -> Vec<u8> {
     let mut buf = [0u8; 4];
     BigEndian::write_u32(&mut buf, x);
     buf.to_vec()
@@ -66,10 +60,8 @@ pub enum HeaderValue {
     String(String),
     Timestamp(DateTime<Utc>),
     Uuid(Uuid),
-    Unknown
+    Unknown,
 }
-
-
 
 impl HeaderValue {
     pub fn type_of(&self) -> u8 {
@@ -84,7 +76,7 @@ impl HeaderValue {
             HeaderValue::String(_) => 7,
             HeaderValue::Timestamp(_) => 8,
             HeaderValue::Uuid(_) => 9,
-            HeaderValue::Unknown => 10
+            HeaderValue::Unknown => 10,
         }
     }
 
@@ -99,17 +91,17 @@ impl HeaderValue {
                 buf.extend(u16_to_u8(b.len() as u16));
                 buf.extend(b);
                 buf
-            },
+            }
             HeaderValue::String(s) => {
                 let mut buf = vec![];
                 buf.extend(u16_to_u8(s.len() as u16));
                 buf.extend(s.as_bytes());
                 buf
-            },
+            }
             HeaderValue::Timestamp(ts) => u64_to_u8(ts.timestamp() as u64),
             HeaderValue::Uuid(uuid) => uuid.as_bytes().to_vec(),
             // Boolean fields don't contain content
-            _ => vec![]
+            _ => vec![],
         }
     }
 }
@@ -122,6 +114,11 @@ impl From<bool> for HeaderValue {
 impl From<Vec<u8>> for HeaderValue {
     fn from(item: Vec<u8>) -> Self {
         HeaderValue::Bytes(item)
+    }
+}
+impl From<&[u8]> for HeaderValue {
+    fn from(item: &[u8]) -> Self {
+        HeaderValue::Bytes(item.to_vec())
     }
 }
 impl From<u16> for HeaderValue {
@@ -149,6 +146,12 @@ impl From<String> for HeaderValue {
         HeaderValue::String(item)
     }
 }
+
+impl From<&str> for HeaderValue {
+    fn from(item: &str) -> Self {
+        HeaderValue::String(item.to_string())
+    }
+}
 impl From<DateTime<Utc>> for HeaderValue {
     fn from(item: DateTime<Utc>) -> Self {
         HeaderValue::Timestamp(item)
@@ -164,7 +167,7 @@ impl From<Uuid> for HeaderValue {
 pub struct PreludeBlock {
     pub total_length: u32,
     pub headers_length: u32,
-    pub checksum: u32
+    pub checksum: u32,
 }
 
 impl PreludeBlock {
@@ -173,7 +176,7 @@ impl PreludeBlock {
         PreludeBlock {
             total_length,
             headers_length,
-            checksum: crc
+            checksum: crc,
         }
     }
     fn _calculate_crc(total_length: u32, headers_length: u32) -> u32 {
@@ -202,20 +205,17 @@ impl PreludeBlock {
 #[derive(Debug, PartialEq)]
 pub struct Header {
     pub key: String,
-    pub value: HeaderValue
+    pub value: HeaderValue,
 }
 
 impl Header {
     pub fn new(key: String, value: HeaderValue) -> Header {
-        Header {
-            key,
-            value
-        }
+        Header { key, value }
     }
-    pub fn from_pair(key: String, value: impl Into<HeaderValue>) -> Header {
+    pub fn from_pair(key: impl Into<String>, value: impl Into<HeaderValue>) -> Header {
         Header {
-            key,
-            value: value.into()
+            key: key.into(),
+            value: value.into(),
         }
     }
     pub fn as_buffer(&self) -> Vec<u8> {
@@ -227,25 +227,27 @@ impl Header {
     }
 }
 
-
 #[derive(Debug, PartialEq)]
 pub struct HeaderBlock {
-    pub headers: Vec<Header>
+    pub headers: Vec<Header>,
 }
 impl HeaderBlock {
     pub fn as_buffer(&self) -> Vec<u8> {
-        let v: Vec<Vec<u8>> = self.headers.iter().map(|h: &Header| h.as_buffer()).collect();
+        let v: Vec<Vec<u8>> = self
+            .headers
+            .iter()
+            .map(|h: &Header| h.as_buffer())
+            .collect();
         v.concat()
     }
 }
-
 
 #[derive(Debug, PartialEq)]
 pub struct Message {
     pub prelude: PreludeBlock,
     pub headers: HeaderBlock,
     pub body: Vec<u8>,
-    pub checksum: u32
+    pub checksum: u32,
 }
 
 impl Message {
@@ -255,14 +257,31 @@ impl Message {
             prelude,
             headers,
             body,
-            checksum: crc
+            checksum: crc,
+        }
+    }
+
+    pub fn build(headers: HeaderBlock, body: Vec<u8>) -> Message {
+        let headers_length = headers.as_buffer().len() as u32;
+        let total_length = headers_length + body.len() as u32 + PRELUDE_SIZE + CHECKSUM_SIZE;
+        let prelude = PreludeBlock::new(total_length, headers_length);
+        let crc = Message::_calculate_crc_from_values(&prelude, &headers, &body);
+        Message {
+            prelude,
+            headers,
+            body,
+            checksum: crc,
         }
     }
 
     pub fn calculate_crc(&self) -> u32 {
         Message::_calculate_crc_from_values(&self.prelude, &self.headers, &self.body)
     }
-    fn _calculate_crc_from_values(prelude: &PreludeBlock, headers: &HeaderBlock, body: &Vec<u8>) -> u32 {
+    fn _calculate_crc_from_values(
+        prelude: &PreludeBlock,
+        headers: &HeaderBlock,
+        body: &Vec<u8>,
+    ) -> u32 {
         let mut digest = crc32::Digest::new(crc32::IEEE);
         digest.write(&prelude.as_buffer());
         digest.write(&headers.as_buffer());
@@ -279,11 +298,10 @@ impl Message {
     }
     pub fn valid(&self) -> bool {
         self.calculate_crc() == self.checksum
-        && self.prelude.valid()
-        && self.as_buffer().len() == self.prelude.total_length as usize
+            && self.prelude.valid()
+            && self.as_buffer().len() == self.prelude.total_length as usize
     }
 }
-
 
 named!(parse_byte<&[u8], HeaderValue>, do_parse!(
     value: be_u8 >>
@@ -322,7 +340,6 @@ named!(parse_timestamp<&[u8], HeaderValue>, do_parse!(
     (HeaderValue::Timestamp(Utc.timestamp(epoch as i64, 0)))
 ));
 
-
 named!(parse_uuid<&[u8], HeaderValue>, do_parse!(
     vals: take!(16) >>
     (HeaderValue::Uuid(Uuid::from_slice(&vals).unwrap()))
@@ -339,7 +356,6 @@ named!(parse_prelude<&[u8], PreludeBlock>, do_parse!(
      })
 ));
 
-
 // 0 => HeaderValue::BooleanTrue,
 // 1 => HeaderValue::BooleanFalse,
 // 2 => HeaderValue::Byte,
@@ -351,7 +367,6 @@ named!(parse_prelude<&[u8], PreludeBlock>, do_parse!(
 // 8 => HeaderValue::Timestamp,
 // 9 => HeaderValue::Uuid,
 // _ => HeaderValue::Unknown,
-
 
 named!(parse_header<&[u8], Header>, do_parse!(
     header_key_length: be_u8 >>
@@ -376,21 +391,22 @@ named!(parse_header<&[u8], Header>, do_parse!(
 ));
 
 fn parse_header_block(input: &[u8], block_length: u32) -> IResult<&[u8], HeaderBlock> {
-  let (input, header_bytes) = take(block_length)(input)?;
+    let (input, header_bytes) = take(block_length)(input)?;
 
-  let mut buffer = header_bytes;
-  let mut headers = Vec::new();
-  while !buffer.is_empty() {
-      let (header_bytes, header) = parse_header(buffer)?;
-      buffer = header_bytes;
-      headers.push(header);
-  }
+    let mut buffer = header_bytes;
+    let mut headers = Vec::new();
+    while !buffer.is_empty() {
+        let (header_bytes, header) = parse_header(buffer)?;
+        buffer = header_bytes;
+        headers.push(header);
+    }
 
-  Ok((input, HeaderBlock { headers }))
+    Ok((input, HeaderBlock { headers }))
 }
 
 fn calculate_body_length(prelude: &PreludeBlock) -> usize {
-    prelude.total_length
+    prelude
+        .total_length
         .checked_sub(PRELUDE_SIZE)
         .and_then(|l| l.checked_sub(prelude.headers_length))
         .and_then(|l| l.checked_sub(CHECKSUM_SIZE))
@@ -411,22 +427,16 @@ named!(pub parse_message<&[u8], Message>, do_parse!(
      })
 ));
 
-use bytes::{BytesMut};
-use std::{
-    io,
-    usize
-};
-use tokio_codec::{
-    Decoder,
-    Encoder
-};
+use bytes::BytesMut;
+use std::{io, usize};
+use tokio_codec::{Decoder, Encoder};
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
 pub struct EventStreamCodec;
 
 impl EventStreamCodec {
     pub fn new() -> EventStreamCodec {
-        EventStreamCodec{}
+        EventStreamCodec {}
     }
 }
 
@@ -439,10 +449,12 @@ impl Decoder for EventStreamCodec {
             Ok((rest_bytes, message)) => {
                 *buf = BytesMut::from(rest_bytes);
                 Ok(Some(message))
-            },
+            }
             Err(Incomplete(_)) => Ok(None),
             Err(Error(_)) => Ok(None),
-            Err(Failure((_, e))) => Err(io::Error::new(io::ErrorKind::InvalidData, e.description()))
+            Err(Failure((_, e))) => {
+                Err(io::Error::new(io::ErrorKind::InvalidData, e.description()))
+            }
         }
     }
 }
@@ -452,12 +464,12 @@ impl Encoder for EventStreamCodec {
     type Error = io::Error;
 
     fn encode(&mut self, msg: Message, buf: &mut BytesMut) -> Result<(), io::Error> {
-        *buf = msg.as_buffer();
+        let msg_buf = msg.as_buffer();
+        buf.reserve(msg_buf.len());
+        buf.put(msg_buf);
         Ok(())
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -465,34 +477,44 @@ mod tests {
 
     #[test]
     fn test_parse_prelude_total_length() {
-        let res = parse_prelude(&hex!("0000001500000001ba25f70d03666f6f013aa3e0d6")).unwrap().1;
+        let res = parse_prelude(&hex!("0000001500000001ba25f70d03666f6f013aa3e0d6"))
+            .unwrap()
+            .1;
         assert_eq!(res.total_length, 21);
     }
 
     #[test]
     fn test_parse_prelude_headers_length() {
-        let res = parse_prelude(&hex!("0000001500000001ba25f70d03666f6f013aa3e0d6")).unwrap().1;
+        let res = parse_prelude(&hex!("0000001500000001ba25f70d03666f6f013aa3e0d6"))
+            .unwrap()
+            .1;
         assert_eq!(res.headers_length, 1);
         assert_eq!(res.calculate_crc(), res.checksum);
     }
 
     #[test]
     fn test_parse_prelude_headers_checksum() {
-        let res = parse_prelude(&hex!("0000001500000001ba25f70d03666f6f013aa3e0d6")).unwrap().1;
+        let res = parse_prelude(&hex!("0000001500000001ba25f70d03666f6f013aa3e0d6"))
+            .unwrap()
+            .1;
         assert_eq!(res.checksum, 3_123_050_253);
         assert_eq!(res.calculate_crc(), res.checksum);
     }
 
     #[test]
     fn test_parse_prelude_is_valid() {
-        let res = parse_prelude(&hex!("0000001500000001ba25f70d03666f6f013aa3e0d6")).unwrap().1;
+        let res = parse_prelude(&hex!("0000001500000001ba25f70d03666f6f013aa3e0d6"))
+            .unwrap()
+            .1;
         assert_eq!(res.valid(), true);
         assert_eq!(res.calculate_crc(), res.checksum);
     }
 
     #[test]
     fn test_parse_prelude_is_invalid() {
-        let res = parse_prelude(&hex!("0000001000000000001020304d98c8ff")).unwrap().1;
+        let res = parse_prelude(&hex!("0000001000000000001020304d98c8ff"))
+            .unwrap()
+            .1;
         assert_eq!(res.total_length, 16);
         assert_eq!(res.headers_length, 0);
         assert_eq!(res.checksum, 1_056_816);
@@ -500,10 +522,11 @@ mod tests {
         assert_ne!(res.calculate_crc(), res.checksum);
     }
 
-
     #[test]
     fn test_no_headers_no_body() {
-        let res = parse_message(&hex!("000000100000000005c248eb7d98c8ff")).unwrap().1;
+        let res = parse_message(&hex!("000000100000000005c248eb7d98c8ff"))
+            .unwrap()
+            .1;
 
         assert_eq!(res.prelude.total_length, 16);
         assert_eq!(res.prelude.headers_length, 0);
@@ -515,7 +538,9 @@ mod tests {
 
     #[test]
     fn test_false_boolean_header() {
-        let res = parse_message(&hex!("0000001500000005bd48331403666f6f01004c70c4")).unwrap().1;
+        let res = parse_message(&hex!("0000001500000005bd48331403666f6f01004c70c4"))
+            .unwrap()
+            .1;
 
         assert_eq!(res.prelude.total_length, 21);
         assert_eq!(res.prelude.headers_length, 5);
@@ -529,7 +554,9 @@ mod tests {
 
     #[test]
     fn test_true_boolean_header() {
-        let res = parse_message(&hex!("0000001500000005ba25f70d03666f6f004da4d040")).unwrap().1;
+        let res = parse_message(&hex!("0000001500000005ba25f70d03666f6f004da4d040"))
+            .unwrap()
+            .1;
 
         assert_eq!(res.prelude.total_length, 21);
         assert_eq!(res.prelude.headers_length, 5);
@@ -539,7 +566,9 @@ mod tests {
 
     #[test]
     fn test_byte_header() {
-        let res = parse_message(&hex!("0000001600000006fd858ddd03666f6f02ffa44bfd93")).unwrap().1;
+        let res = parse_message(&hex!("0000001600000006fd858ddd03666f6f02ffa44bfd93"))
+            .unwrap()
+            .1;
 
         assert_eq!(res.prelude.total_length, 22);
         assert_eq!(res.prelude.headers_length, 6);
@@ -549,7 +578,11 @@ mod tests {
 
     #[test]
     fn test_bytes_header() {
-        let res = parse_message(&hex!("0000001c0000000cb735957c03666f6f0600050102030405cdda4038")).unwrap().1;
+        let res = parse_message(&hex!(
+            "0000001c0000000cb735957c03666f6f0600050102030405cdda4038"
+        ))
+        .unwrap()
+        .1;
 
         assert_eq!(res.prelude.total_length, 28);
         assert_eq!(res.prelude.headers_length, 12);
@@ -599,7 +632,10 @@ mod tests {
         if let HeaderValue::String(s) = &hdr_2.value {
             assert_eq!(*s, "application/json".to_string());
         }
-        assert_eq!(res.body, [123, 39, 102, 111, 111, 39, 58, 39, 98, 97, 114, 39, 125]);
+        assert_eq!(
+            res.body,
+            [123, 39, 102, 111, 111, 39, 58, 39, 98, 97, 114, 39, 125]
+        );
     }
 
     #[test]
@@ -617,16 +653,20 @@ mod tests {
         assert_eq!(4, calculate_body_length(&PreludeBlock::new(20, 0)));
         assert_eq!(14, calculate_body_length(&PreludeBlock::new(30, 0)));
     }
+    #[test]
+    fn test_message_build() {
+        let a = Message::new(
+            PreludeBlock::new(16, 0),
+            HeaderBlock { headers: vec![] },
+            vec![],
+        );
+        let b = Message::build(HeaderBlock { headers: vec![] }, vec![]);
+        assert_eq!(a, b);
+    }
 
     #[test]
     fn test_symmetric_from_struct() {
-        let original = Message::new(
-                PreludeBlock::new(16, 0),
-                HeaderBlock{
-                    headers: vec![]
-                },
-                vec![]
-            );
+        let original = Message::build(HeaderBlock { headers: vec![] }, vec![]);
         assert!(original.valid());
         let buffer = original.as_buffer().to_vec();
         let res = parse_message(&buffer).unwrap().1;
@@ -637,12 +677,10 @@ mod tests {
     #[test]
     fn test_invalid_total_length() {
         let original = Message::new(
-                PreludeBlock::new(17, 0),
-                HeaderBlock{
-                    headers: vec![]
-                },
-                vec![]
-            );
+            PreludeBlock::new(17, 0),
+            HeaderBlock { headers: vec![] },
+            vec![],
+        );
         assert!(!original.valid());
         let buffer = original.as_buffer().to_vec();
         let res = parse_message(&buffer).is_err();
@@ -657,7 +695,9 @@ mod tests {
 
     #[test]
     fn test_none_if_no_buffer_length_match() {
-        let res = parse_message(&hex!("0000003d0000002007fd83960c636f6e74656e742d747970650700106170706c69636174696f6e2f6a73"));
+        let res = parse_message(&hex!(
+            "0000003d0000002007fd83960c636f6e74656e742d747970650700106170706c69636174696f6e2f6a73"
+        ));
         assert!(res.is_err());
     }
 
@@ -674,13 +714,85 @@ mod tests {
     fn test_u32_to_u8() {
         assert_eq!(vec![0u8, 0u8, 0u8, 0u8], u32_to_u8(0u32));
         assert_eq!(vec![0u8, 0u8, 255u8, 255u8], u32_to_u8(65535u32));
-        assert_eq!(vec![255u8, 255u8, 255u8, 255u8], u32_to_u8(4_294_967_295u32));
+        assert_eq!(
+            vec![255u8, 255u8, 255u8, 255u8],
+            u32_to_u8(4_294_967_295u32)
+        );
     }
     #[test]
     fn test_u64_to_u8() {
-        assert_eq!(vec![0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8], u64_to_u8(0u64));
-        assert_eq!(vec![0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 255u8, 255u8], u64_to_u8(65535u64));
-        assert_eq!(vec![0u8, 0u8, 0u8, 0u8, 255u8, 255u8, 255u8, 255u8], u64_to_u8(4_294_967_295u64));
+        assert_eq!(
+            vec![0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 0u8],
+            u64_to_u8(0u64)
+        );
+        assert_eq!(
+            vec![0u8, 0u8, 0u8, 0u8, 0u8, 0u8, 255u8, 255u8],
+            u64_to_u8(65535u64)
+        );
+        assert_eq!(
+            vec![0u8, 0u8, 0u8, 0u8, 255u8, 255u8, 255u8, 255u8],
+            u64_to_u8(4_294_967_295u64)
+        );
+    }
+
+    #[test]
+    fn test_headervalue_from_boolean() {
+        let a: HeaderValue = true.into();
+        let b: HeaderValue = false.into();
+        assert_eq!(a, HeaderValue::Boolean(true));
+        assert_eq!(b, HeaderValue::Boolean(false));
+    }
+
+    #[test]
+    fn test_headervalue_from_byte() {
+        let a: HeaderValue = 3u8.into();
+        assert_eq!(a, HeaderValue::Byte(3));
+    }
+    #[test]
+    fn test_headervalue_from_short() {
+        let a: HeaderValue = 4333u16.into();
+        assert_eq!(a, HeaderValue::Short(4333));
+    }
+    #[test]
+    fn test_headervalue_from_integer() {
+        let a: HeaderValue = 411333u32.into();
+        assert_eq!(a, HeaderValue::Integer(411333));
+    }
+    #[test]
+    fn test_headervalue_from_long() {
+        let a: HeaderValue = 4333781237812377u64.into();
+        assert_eq!(a, HeaderValue::Long(4333781237812377));
+    }
+    #[test]
+    fn test_headervalue_from_string() {
+        let a: HeaderValue = "asdadsd&&€".to_string().into();
+        assert_eq!(a, HeaderValue::String("asdadsd&&€".to_string()));
+    }
+    #[test]
+    fn test_headervalue_from_str() {
+        let a: HeaderValue = "asdadsd&&€".into();
+        assert_eq!(a, HeaderValue::String("asdadsd&&€".to_string()));
+    }
+
+    #[test]
+    fn test_headervalue_from_bytes() {
+        let a: HeaderValue = vec![23u8, 120u8].into();
+        assert_eq!(a, HeaderValue::Bytes([23u8, 120u8].to_vec()));
+    }
+
+    #[test]
+    fn test_headervalue_from_timestamp() {
+        let dt = Utc.ymd(2014, 7, 8).and_hms(9, 10, 11);
+
+        let a: HeaderValue = dt.into();
+        assert_eq!(a, HeaderValue::Timestamp(dt));
+    }
+    #[test]
+    fn test_headervalue_from_uuid() {
+        let code = Uuid::parse_str("936DA01F9ABD4d9d80C702AF85C822A8").unwrap();
+
+        let a: HeaderValue = code.into();
+        assert_eq!(a, HeaderValue::Uuid(code));
     }
 
     #[test]
@@ -763,7 +875,13 @@ mod tests {
     fn test_serialize_string() {
         //HeaderValue::String(_) => 6,
         let buf = HeaderValue::String("hello world".to_string()).as_buffer();
-        assert_eq!(buf, [0u8, 11u8, 104u8, 101u8, 108u8, 108u8, 111u8, 32u8, 119u8, 111u8, 114u8, 108u8, 100u8]);
+        assert_eq!(
+            buf,
+            [
+                0u8, 11u8, 104u8, 101u8, 108u8, 108u8, 111u8, 32u8, 119u8, 111u8, 114u8, 108u8,
+                100u8
+            ]
+        );
         if let HeaderValue::String(b) = parse_string(&buf).unwrap().1 {
             assert_eq!(b, "hello world".to_string());
         } else {
@@ -793,7 +911,10 @@ mod tests {
         let code = Uuid::parse_str("936DA01F9ABD4d9d80C702AF85C822A8").unwrap();
 
         let buf = HeaderValue::Uuid(code).as_buffer();
-        assert_eq!(buf, [147, 109, 160, 31, 154, 189, 77, 157, 128, 199, 2, 175, 133, 200, 34, 168]);
+        assert_eq!(
+            buf,
+            [147, 109, 160, 31, 154, 189, 77, 157, 128, 199, 2, 175, 133, 200, 34, 168]
+        );
         if let HeaderValue::Uuid(b) = parse_uuid(&buf).unwrap().1 {
             assert_eq!(b, code);
         } else {
@@ -802,6 +923,5 @@ mod tests {
         // Not enough data provided (11 chars, only 1 provided)
         assert!(parse_uuid(&[11u8, 104u8]).is_err());
     }
-
 
 }
