@@ -280,7 +280,7 @@ impl Message {
     fn _calculate_crc_from_values(
         prelude: &PreludeBlock,
         headers: &HeaderBlock,
-        body: &Vec<u8>,
+        body: &[u8],
     ) -> u32 {
         let mut digest = crc32::Digest::new(crc32::IEEE);
         digest.write(&prelude.as_buffer());
@@ -431,14 +431,9 @@ use bytes::BytesMut;
 use std::{io, usize};
 use tokio_codec::{Decoder, Encoder};
 
-#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Default)]
 pub struct EventStreamCodec;
 
-impl EventStreamCodec {
-    pub fn new() -> EventStreamCodec {
-        EventStreamCodec {}
-    }
-}
 
 impl Decoder for EventStreamCodec {
     type Item = Message;

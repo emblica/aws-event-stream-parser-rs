@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate hex_literal;
 
-use bytes::{BufMut, Bytes, BytesMut};
+use bytes::{BufMut, BytesMut};
 
 use aws_event_stream_parser::{parse_message, EventStreamCodec, Header, HeaderBlock, Message};
 use tokio_codec::{Decoder, Encoder};
@@ -14,10 +14,10 @@ fn test_parse_multiple_messages() {
         0000001d0000000d83e3f0e7047465737407000568656c6c
         6f1afe7100"
     );
-    let (b, m) = parse_message(&buf).unwrap();
+    let (b, _) = parse_message(&buf).unwrap();
     let buf2 = hex!(
         "0000001d0000000d83e3f0e7047465
-                     737407000568656c6c6f1afe7100"
+         737407000568656c6c6f1afe7100"
     );
     assert_eq!(b, buf2);
 }
@@ -29,14 +29,14 @@ fn test_encoder() {
     buf.put(
         hex!(
             "00000018000000083b698b1804746573
-                  7403007821ab38830000001d0000000d
-                  83e3f0e7047465737407000568656c6c
-                  6f1afe7100"
+             7403007821ab38830000001d0000000d
+             83e3f0e7047465737407000568656c6c
+             6f1afe7100"
         )
         .to_vec(),
     );
 
-    let mut codec = EventStreamCodec::new();
+    let mut codec = EventStreamCodec::default();
     assert_eq!(
         Message::build(
             HeaderBlock {
@@ -59,7 +59,7 @@ fn test_encoder() {
 }
 #[test]
 fn test_decoder() {
-    let mut codec = EventStreamCodec::new();
+    let mut codec = EventStreamCodec::default();
     let mut buf = BytesMut::new();
 
     codec
@@ -78,7 +78,7 @@ fn test_decoder() {
         BytesMut::from(
             hex!(
                 "00000018000000083b698b18
-                                    047465737403007821ab3883"
+                 047465737403007821ab3883"
             )
             .to_vec()
         ),
@@ -100,10 +100,10 @@ fn test_decoder() {
         BytesMut::from(
             hex!(
                 "00000018000000083b698b1
-                                    8047465737403007821ab38
-                                    830000001d0000000d83e3f
-                                    0e704746573740700056865
-                                    6c6c6f1afe7100"
+                 8047465737403007821ab38
+                 830000001d0000000d83e3f
+                 0e704746573740700056865
+                 6c6c6f1afe7100"
             )
             .to_vec()
         ),
