@@ -1,6 +1,6 @@
 [package]
 name = "aws_event_stream_parser"
-version = "0.0.3"
+version = "0.0.4"
 license = "MIT"
 readme = "readme.md"
 description = "Rust implementation of the vnd.amazon.event-stream binary format"
