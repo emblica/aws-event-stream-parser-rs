@@ -14,6 +14,7 @@ extern crate byteorder;
 extern crate uuid;
 extern crate bytes;
 extern crate tokio_codec;
+use std::convert::From;
 use bytes::BufMut;
 use nom::Err::Incomplete;
 use nom::Err::Error;
@@ -54,7 +55,7 @@ fn u16_to_u8(x: u16) -> Vec<u8> {
     buf.to_vec()
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum HeaderValue {
     Boolean(bool),
     Bytes(Vec<u8>),
@@ -113,7 +114,53 @@ impl HeaderValue {
     }
 }
 
-#[derive(Debug)]
+impl From<bool> for HeaderValue {
+    fn from(item: bool) -> Self {
+        HeaderValue::Boolean(item)
+    }
+}
+impl From<Vec<u8>> for HeaderValue {
+    fn from(item: Vec<u8>) -> Self {
+        HeaderValue::Bytes(item)
+    }
+}
+impl From<u16> for HeaderValue {
+    fn from(item: u16) -> Self {
+        HeaderValue::Short(item)
+    }
+}
+impl From<u32> for HeaderValue {
+    fn from(item: u32) -> Self {
+        HeaderValue::Integer(item)
+    }
+}
+impl From<u64> for HeaderValue {
+    fn from(item: u64) -> Self {
+        HeaderValue::Long(item)
+    }
+}
+impl From<u8> for HeaderValue {
+    fn from(item: u8) -> Self {
+        HeaderValue::Byte(item)
+    }
+}
+impl From<String> for HeaderValue {
+    fn from(item: String) -> Self {
+        HeaderValue::String(item)
+    }
+}
+impl From<DateTime<Utc>> for HeaderValue {
+    fn from(item: DateTime<Utc>) -> Self {
+        HeaderValue::Timestamp(item)
+    }
+}
+impl From<Uuid> for HeaderValue {
+    fn from(item: Uuid) -> Self {
+        HeaderValue::Uuid(item)
+    }
+}
+
+#[derive(Debug, PartialEq)]
 pub struct PreludeBlock {
     pub total_length: u32,
     pub headers_length: u32,
@@ -121,11 +168,22 @@ pub struct PreludeBlock {
 }
 
 impl PreludeBlock {
-    pub fn calculate_crc(&self) -> u32 {
+    pub fn new(total_length: u32, headers_length: u32) -> PreludeBlock {
+        let crc = PreludeBlock::_calculate_crc(total_length, headers_length);
+        PreludeBlock {
+            total_length,
+            headers_length,
+            checksum: crc
+        }
+    }
+    fn _calculate_crc(total_length: u32, headers_length: u32) -> u32 {
         let mut digest = crc32::Digest::new(crc32::IEEE);
-        digest.write(&u32_to_u8(self.total_length));
-        digest.write(&u32_to_u8(self.headers_length));
+        digest.write(&u32_to_u8(total_length));
+        digest.write(&u32_to_u8(headers_length));
         digest.sum32()
+    }
+    pub fn calculate_crc(&self) -> u32 {
+        PreludeBlock::_calculate_crc(self.total_length, self.headers_length)
     }
 
     pub fn valid(&self) -> bool {
@@ -141,13 +199,25 @@ impl PreludeBlock {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Header {
     pub key: String,
     pub value: HeaderValue
 }
 
 impl Header {
+    pub fn new(key: String, value: HeaderValue) -> Header {
+        Header {
+            key,
+            value
+        }
+    }
+    pub fn from_pair(key: String, value: impl Into<HeaderValue>) -> Header {
+        Header {
+            key,
+            value: value.into()
+        }
+    }
     pub fn as_buffer(&self) -> Vec<u8> {
         let mut buf: Vec<u8> = vec![self.key.len() as u8];
         buf.extend(self.key.as_bytes());
@@ -158,7 +228,7 @@ impl Header {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct HeaderBlock {
     pub headers: Vec<Header>
 }
@@ -170,7 +240,7 @@ impl HeaderBlock {
 }
 
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct Message {
     pub prelude: PreludeBlock,
     pub headers: HeaderBlock,
@@ -179,11 +249,24 @@ pub struct Message {
 }
 
 impl Message {
+    pub fn new(prelude: PreludeBlock, headers: HeaderBlock, body: Vec<u8>) -> Message {
+        let crc = Message::_calculate_crc_from_values(&prelude, &headers, &body);
+        Message {
+            prelude,
+            headers,
+            body,
+            checksum: crc
+        }
+    }
+
     pub fn calculate_crc(&self) -> u32 {
+        Message::_calculate_crc_from_values(&self.prelude, &self.headers, &self.body)
+    }
+    fn _calculate_crc_from_values(prelude: &PreludeBlock, headers: &HeaderBlock, body: &Vec<u8>) -> u32 {
         let mut digest = crc32::Digest::new(crc32::IEEE);
-        digest.write(&self.prelude.as_buffer());
-        digest.write(&self.headers.as_buffer());
-        digest.write(&self.body);
+        digest.write(&prelude.as_buffer());
+        digest.write(&headers.as_buffer());
+        digest.write(&body);
         digest.sum32()
     }
     pub fn as_buffer(&self) -> BytesMut {
@@ -195,7 +278,9 @@ impl Message {
         buf
     }
     pub fn valid(&self) -> bool {
-        self.calculate_crc() == self.checksum && self.prelude.valid()
+        self.calculate_crc() == self.checksum
+        && self.prelude.valid()
+        && self.as_buffer().len() == self.prelude.total_length as usize
     }
 }
 
@@ -304,11 +389,19 @@ fn parse_header_block(input: &[u8], block_length: u32) -> IResult<&[u8], HeaderB
   Ok((input, HeaderBlock { headers }))
 }
 
+fn calculate_body_length(prelude: &PreludeBlock) -> usize {
+    prelude.total_length
+        .checked_sub(PRELUDE_SIZE)
+        .and_then(|l| l.checked_sub(prelude.headers_length))
+        .and_then(|l| l.checked_sub(CHECKSUM_SIZE))
+        .map(|l| l as usize)
+        .unwrap_or(0)
+}
 
 named!(pub parse_message<&[u8], Message>, do_parse!(
     prelude: parse_prelude >>
     headers: call!(parse_header_block, prelude.headers_length) >>
-    body: take!(prelude.total_length - PRELUDE_SIZE - prelude.headers_length - CHECKSUM_SIZE) >>
+    body: take!(calculate_body_length(&prelude)) >>
     checksum: be_u32 >>
     (Message {
         prelude: prelude,
@@ -507,6 +600,53 @@ mod tests {
             assert_eq!(*s, "application/json".to_string());
         }
         assert_eq!(res.body, [123, 39, 102, 111, 111, 39, 58, 39, 98, 97, 114, 39, 125]);
+    }
+
+    #[test]
+    fn test_symmetric_from_bytes() {
+        let original = hex!("000000cc000000af0fae64ca0a6576656e742d74797065040000a00c0c636f6e74656e742d747970650700106170706c69636174696f6e2f6a736f6e0a626f6f6c2066616c73650109626f6f6c207472756500046279746502cf08627974652062756606001449276d2061206c6974746c6520746561706f74210974696d657374616d70080000000000845fed05696e74313603002a05696e7436340500000000028757b20475756964090102030405060708090a0b0c0d0e0f107b27666f6f273a27626172277daba5f10c");
+        let res = parse_message(&original).unwrap().1;
+
+        assert_eq!(res.as_buffer().to_vec(), original.to_vec());
+    }
+
+    #[test]
+    fn test_body_length_calculation() {
+        assert_eq!(0, calculate_body_length(&PreludeBlock::new(0, 0)));
+        assert_eq!(0, calculate_body_length(&PreludeBlock::new(10, 0)));
+        assert_eq!(4, calculate_body_length(&PreludeBlock::new(20, 0)));
+        assert_eq!(14, calculate_body_length(&PreludeBlock::new(30, 0)));
+    }
+
+    #[test]
+    fn test_symmetric_from_struct() {
+        let original = Message::new(
+                PreludeBlock::new(16, 0),
+                HeaderBlock{
+                    headers: vec![]
+                },
+                vec![]
+            );
+        assert!(original.valid());
+        let buffer = original.as_buffer().to_vec();
+        let res = parse_message(&buffer).unwrap().1;
+        assert!(res.valid());
+        assert_eq!(res, original);
+    }
+
+    #[test]
+    fn test_invalid_total_length() {
+        let original = Message::new(
+                PreludeBlock::new(17, 0),
+                HeaderBlock{
+                    headers: vec![]
+                },
+                vec![]
+            );
+        assert!(!original.valid());
+        let buffer = original.as_buffer().to_vec();
+        let res = parse_message(&buffer).is_err();
+        assert!(res);
     }
 
     #[test]
