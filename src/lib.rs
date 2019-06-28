@@ -12,6 +12,13 @@ extern crate crc;
 extern crate chrono;
 extern crate byteorder;
 extern crate uuid;
+extern crate bytes;
+extern crate tokio_codec;
+use std::convert::TryInto;
+use bytes::{Bytes, BufMut};
+use nom::Err::Incomplete;
+use nom::Err::Error;
+use nom::Err::Failure;
 use uuid::Uuid;
 use byteorder::BigEndian;
 use byteorder::ByteOrder;
@@ -180,6 +187,14 @@ impl Message {
         digest.write(&self.body);
         digest.sum32()
     }
+    pub fn as_buffer(&self) -> BytesMut {
+        let mut buf = BytesMut::with_capacity(self.prelude.total_length as usize);
+        buf.put(self.prelude.as_buffer());
+        buf.put(self.headers.as_buffer());
+        buf.put(&self.body);
+        buf.put(&u32_to_u8(self.checksum));
+        buf
+    }
     pub fn valid(&self) -> bool {
         self.calculate_crc() == self.checksum && self.prelude.valid()
     }
@@ -278,7 +293,7 @@ named!(parse_header<&[u8], Header>, do_parse!(
 
 fn parse_header_block(input: &[u8], block_length: u32) -> IResult<&[u8], HeaderBlock> {
   let (input, header_bytes) = take(block_length)(input)?;
-  // let (inp2, headers) = many0(parse_header)(header_bytes)?;
+
   let mut buffer = header_bytes;
   let mut headers = Vec::new();
   while !buffer.is_empty() {
@@ -286,7 +301,7 @@ fn parse_header_block(input: &[u8], block_length: u32) -> IResult<&[u8], HeaderB
       buffer = header_bytes;
       headers.push(header);
   }
-  //Ok((input, HeaderBlock { headers: headers }))
+
   Ok((input, HeaderBlock { headers }))
 }
 
@@ -304,11 +319,56 @@ named!(pub parse_message<&[u8], Message>, do_parse!(
      })
 ));
 
+use bytes::{BytesMut};
+use std::{
+    io,
+    usize
+};
+use tokio_codec::{
+    Decoder,
+    Encoder
+};
+
+#[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash)]
+pub struct EventStreamCodec;
+
+impl EventStreamCodec {
+    pub fn new() -> EventStreamCodec {
+        EventStreamCodec{}
+    }
+}
+
+impl Decoder for EventStreamCodec {
+    type Item = Message;
+    type Error = std::io::Error;
+
+    fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<Message>, Self::Error> {
+        match parse_message(buf) {
+            Ok((rest_bytes, message)) => {
+                *buf = BytesMut::from(rest_bytes);
+                Ok(Some(message))
+            },
+            Err(Incomplete(_)) => Ok(None),
+            Err(Error(_)) => Ok(None),
+            Err(Failure((_, e))) => Err(io::Error::new(io::ErrorKind::InvalidData, e.description()))
+        }
+    }
+}
+
+impl Encoder for EventStreamCodec {
+    type Item = Message;
+    type Error = io::Error;
+
+    fn encode(&mut self, msg: Message, buf: &mut BytesMut) -> Result<(), io::Error> {
+        *buf = msg.as_buffer();
+        Ok(())
+    }
+}
+
 
 
 #[cfg(test)]
 mod tests {
-    // Note this useful idiom: importing names from outer (for mod tests) scope.
     use super::*;
 
     #[test]

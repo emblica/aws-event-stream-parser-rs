@@ -9,11 +9,13 @@ authors = ["Teemu Heikkilä <teemu@emblica.fi>"]
 edition = "2018"
 
 [dependencies]
-nom = "5.0.0-beta2"
+nom = "5.0.0"
 crc = "^1.0.0"
 byteorder = "1"
 chrono = "0.4"
 uuid = "0.7.4"
+tokio-codec = "0.1.1"
+bytes = "0.4.12"
 
 [dev-dependencies]
 hex-literal = "0.2.0"
