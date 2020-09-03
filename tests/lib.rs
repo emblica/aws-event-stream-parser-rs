@@ -1,10 +1,13 @@
 #[macro_use]
 extern crate hex_literal;
+extern crate bytes;
+extern crate tokio_util;
+extern crate aws_event_stream_parser;
 
 use bytes::{BufMut, BytesMut};
 
 use aws_event_stream_parser::{parse_message, EventStreamCodec, Header, HeaderBlock, Message};
-use tokio_codec::{Decoder, Encoder};
+use tokio_util::codec::{Decoder, Encoder};
 
 #[test]
 fn test_parse_multiple_messages() {
@@ -26,8 +29,8 @@ fn test_parse_multiple_messages() {
 fn test_encoder() {
     let buf = &mut BytesMut::new();
     buf.reserve(200);
-    buf.put(
-        hex!(
+    buf.put_slice(
+        &hex!(
             "00000018000000083b698b1804746573
              7403007821ab38830000001d0000000d
              83e3f0e7047465737407000568656c6c
@@ -74,14 +77,15 @@ fn test_decoder() {
         )
         .unwrap();
 
+    let mut fbuf = BytesMut::new();
+    fbuf.put_slice(&hex!(
+        "00000018000000083b698b18
+         047465737403007821ab3883"
+    )
+    .to_vec());
+
     assert_eq!(
-        BytesMut::from(
-            hex!(
-                "00000018000000083b698b18
-                 047465737403007821ab3883"
-            )
-            .to_vec()
-        ),
+        fbuf,
         buf
     );
 
@@ -96,17 +100,14 @@ fn test_decoder() {
             &mut buf,
         )
         .unwrap();
-    assert_eq!(
-        BytesMut::from(
-            hex!(
-                "00000018000000083b698b1
-                 8047465737403007821ab38
-                 830000001d0000000d83e3f
-                 0e704746573740700056865
-                 6c6c6f1afe7100"
-            )
-            .to_vec()
-        ),
-        buf
-    );
+    let mut fbuf = BytesMut::new();
+    fbuf.put_slice(&hex!(
+        "00000018000000083b698b1
+         8047465737403007821ab38
+         830000001d0000000d83e3f
+         0e704746573740700056865
+         6c6c6f1afe7100"
+    )
+    .to_vec());
+    assert_eq!(fbuf, buf);
 }

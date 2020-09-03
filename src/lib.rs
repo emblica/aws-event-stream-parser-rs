@@ -11,7 +11,7 @@ extern crate byteorder;
 extern crate bytes;
 extern crate chrono;
 extern crate crc;
-extern crate tokio_codec;
+extern crate tokio_util;
 extern crate uuid;
 use byteorder::BigEndian;
 use byteorder::ByteOrder;
@@ -290,10 +290,10 @@ impl Message {
     }
     pub fn as_buffer(&self) -> BytesMut {
         let mut buf = BytesMut::with_capacity(self.prelude.total_length as usize);
-        buf.put(self.prelude.as_buffer());
-        buf.put(self.headers.as_buffer());
-        buf.put(&self.body);
-        buf.put(&u32_to_u8(self.checksum));
+        buf.put_slice(&self.prelude.as_buffer());
+        buf.put_slice(&self.headers.as_buffer());
+        buf.put_slice(&self.body);
+        buf.put_slice(&u32_to_u8(self.checksum));
         buf
     }
     pub fn valid(&self) -> bool {
@@ -429,7 +429,7 @@ named!(pub parse_message<&[u8], Message>, do_parse!(
 
 use bytes::BytesMut;
 use std::{io, usize};
-use tokio_codec::{Decoder, Encoder};
+use tokio_util::codec::{Decoder, Encoder};
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd, Hash, Default)]
 pub struct EventStreamCodec;
@@ -454,8 +454,8 @@ impl Decoder for EventStreamCodec {
     }
 }
 
-impl Encoder for EventStreamCodec {
-    type Item = Message;
+impl Encoder<Message> for EventStreamCodec {
+    // type Item = Message;
     type Error = io::Error;
 
     fn encode(&mut self, msg: Message, buf: &mut BytesMut) -> Result<(), io::Error> {
