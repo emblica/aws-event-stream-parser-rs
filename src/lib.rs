@@ -285,7 +285,7 @@ impl Message {
         let mut digest = crc32::Digest::new(crc32::IEEE);
         digest.write(&prelude.as_buffer());
         digest.write(&headers.as_buffer());
-        digest.write(&body);
+        digest.write(body);
         digest.sum32()
     }
     pub fn as_buffer(&self) -> BytesMut {
@@ -342,7 +342,7 @@ named!(parse_timestamp<&[u8], HeaderValue>, do_parse!(
 
 named!(parse_uuid<&[u8], HeaderValue>, do_parse!(
     vals: take!(16) >>
-    (HeaderValue::Uuid(Uuid::from_slice(&vals).unwrap()))
+    (HeaderValue::Uuid(Uuid::from_slice(vals).unwrap()))
 ));
 
 named!(parse_prelude<&[u8], PreludeBlock>, do_parse!(
@@ -351,7 +351,7 @@ named!(parse_prelude<&[u8], PreludeBlock>, do_parse!(
     prelude_checksum: be_u32 >>
     (PreludeBlock {
         total_length: message_total_length,
-        headers_length: headers_length,
+        headers_length,
         checksum: prelude_checksum
      })
 ));
@@ -386,7 +386,7 @@ named!(parse_header<&[u8], Header>, do_parse!(
     ) >>
     (Header {
         key: header_key.to_string(),
-        value: value
+        value
      })
 ));
 
@@ -420,10 +420,10 @@ named!(pub parse_message<&[u8], Message>, do_parse!(
     body: take!(calculate_body_length(&prelude)) >>
     checksum: be_u32 >>
     (Message {
-        prelude: prelude,
-        headers: headers,
+        prelude,
+        headers,
         body: body.into(),
-        checksum: checksum
+        checksum,
      })
 ));
 
