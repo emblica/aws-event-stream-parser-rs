@@ -337,7 +337,7 @@ named!(parse_string<&[u8], HeaderValue>, do_parse!(
 
 named!(parse_timestamp<&[u8], HeaderValue>, do_parse!(
     epoch: be_u64 >>
-    (HeaderValue::Timestamp(Utc.timestamp(epoch as i64, 0)))
+    (HeaderValue::Timestamp(Utc.timestamp_opt(epoch as i64, 0).unwrap()))
 ));
 
 named!(parse_uuid<&[u8], HeaderValue>, do_parse!(
